@@ -27,7 +27,7 @@ def setMidiDirectory():
 
 # Create the grid
 def createGrid(image):
-    nSquares = 50
+    nSquares = 20
     gridSizeX = int(round(image.shape[0] / nSquares, 0))
     gridSizeY = int(round(image.shape[1] / nSquares, 0))
     grid = []
