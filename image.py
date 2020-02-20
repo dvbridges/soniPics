@@ -1,11 +1,16 @@
+import os
+import argparse
 import imageio
+import numpy as np
 from PIL import ImageOps, Image
 from random import shuffle
-import numpy as np
 from midiutil.MidiFile import MIDIFile
-import os
 
 tones = {} 
+
+# Set command line interface
+parser = argparse.ArgumentParser()
+parser.add_argument('--pixel', help='Use to write midi from pixels, not grid', default=False, action='store_true')
 
 # Get the images from the image file
 def getImages(fileName):
@@ -73,7 +78,7 @@ def saveGridImage(path, im):
     newImage = os.path.join("gridImages", os.path.basename(path))
     imageio.imwrite(newImage, im)
 
-def processImages(randomize=False, fileName="images.txt"):
+def processImages(randomize=False, fileName="images.txt", usePixel=False):
     # Loop through each image and get the luminace values
     for eachImage in getImages(fileName):
         # Read image
@@ -86,15 +91,24 @@ def processImages(randomize=False, fileName="images.txt"):
         # Rotate iamge if required
         if imageShape[0] != image.shape:
             image = np.rot90(np.fliplr(image.T))      
-
-        testImage = image
+        
+        # Get image name
+        name = eachImage.split('.')[0]
+        tones[name] = []
+        
+        if usePixel:
+            for row in image:
+                for val in row:
+                    tones[name].append(val)
+            return
+        
+        testImage = image  # test image visualises the grid
         # Get grid
         grid = createGrid(image)
         # Randomize grid order if randomize==True
         randomizeGrid(grid, randomize)
         # Get image name
-        name = eachImage.split('.')[0]
-        tones[name] = []
+        
         # Get tones 
         for piece in grid:
             newImage = image[piece[0]:piece[1], piece[2]:piece[3]]
@@ -103,6 +117,20 @@ def processImages(randomize=False, fileName="images.txt"):
         
         # Save grid as image
         saveGridImage(eachImage, testImage)
+
+# Save each midi value in the csv
+def saveMidiValues(toneLibrary, tones):
+    if not os.path.isdir("./imageData"):
+        os.mkdir("./imageData")
+
+    for tone in tones:
+        with open("./imageData/{}.csv".format(tone.split('/')[1]), "w") as myFile:
+            # Write column headers
+            myFile.write("{0},{1},{2}\n".format("Index", "Luminance", "Tone"))
+            # Write values
+            for index, eachVal in enumerate(tones[tone]):
+                if index % 10 == 0:
+                    myFile.write("{0},{1},{2}\n".format(index, eachVal, getTone(toneLibrary, eachVal)[0]))
 
 def writeMidi():
     # Get all tones to find the min and max lumination values 
@@ -113,7 +141,11 @@ def writeMidi():
 
     # The tone increment
     toneIncrement = (maxTone - minTone) / 12
+    
+    print("Your lowest tone is {}".format(minTone))
+    print("Your highest tone is {}".format(maxTone))
     print("Your tone increment is {}".format(toneIncrement))
+
     # The tone library starting at C (I think)
     toneLibrary = {
             60 : {'tone': [minTone, minTone + toneIncrement], 'duration': .5},
@@ -132,11 +164,9 @@ def writeMidi():
 
     # Create midifile directory
     setMidiDirectory()
-    
-    for tone in tones:
-        with open("{}.csv".format(tone.split('/')[1]), "w") as myFile:
-            for index, eachVal in enumerate(tones[tone]):
-                myFile.write("{0}\t{1}\n".format(index, eachVal))
+
+    # Save the midi values in csv file
+    saveMidiValues(toneLibrary, tones)
 
     # Create the midi files from the images
     for eachImage in tones:
@@ -154,21 +184,32 @@ def writeMidi():
         
         # Add each tone from the current image
         for index, val in enumerate(tones[eachImage]):
-            # Get tone from library
-            tone = getTone(toneLibrary, val)[0]
-            # Get duration from library
-            duration = getTone(toneLibrary, val)[1]
-            # Set interval between tones
-            toneInterval = index * duration
-            # Add note to track
-            tempMIDI.addNote(track, channel, tone, time + toneInterval, duration, volume)
-        
+            if index % 10 == 0:
+                # Get tone from library
+                tone = getTone(toneLibrary, val)[0]
+                # Get duration from library
+                duration = getTone(toneLibrary, val)[1]
+                # Set interval between tones
+                toneInterval = (index / 10) * duration
+                # Add note to track
+                tempMIDI.addNote(track, channel, tone, time + toneInterval, duration, volume)
+            
         # Write the midi track to a file
         with open("midiFiles/{}.mid".format(eachImage.split('/')[1]), "wb") as midiFile:
             tempMIDI.writeFile(midiFile)
 
 
 if __name__ == "__main__":
-    processImages(randomize = False, fileName="images.txt")
+    
+    args = parser.parse_args()
+
+    if args.pixel:
+        print("Creating midi from pixels...")
+
+    processImages(randomize = False, fileName="images.txt", usePixel=args.pixel)
+
+    # Get all images
+    # 
+
     writeMidi()
 
