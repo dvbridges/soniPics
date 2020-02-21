@@ -4,13 +4,15 @@ import imageio
 import numpy as np
 from PIL import ImageOps, Image
 from random import shuffle
-from midiutil.MidiFile import MIDIFile
 
-tones = {} 
+from midiutil.MidiFile import MIDIFile
+from scales import scales, BASE_NOTES, BASE_MIDI_NOTE
+
 
 # Set command line interface
 parser = argparse.ArgumentParser()
 parser.add_argument('--pixel', help='Use to write midi from pixels, not grid', default=False, action='store_true')
+tones = {}
 
 def makeFolder(folderName):
     """
@@ -19,9 +21,6 @@ def makeFolder(folderName):
     if not os.path.isdir(folderName):
         os.mkdir(folderName)
     return folderName
-
-def saveCSV(folder, fileName):
-    pass
 
 def saveImage(folder, fileName, image):
     imagePath = os.path.join(folder, os.path.basename(fileName + '.png'))
@@ -41,8 +40,12 @@ def readImage(fileName):
     """
     temp = Image.open(fileName)
     imageShape = ImageOps.exif_transpose(temp).size
-    image = imageio.imread(fileName)
+    image = imageio.imread(fileName, pilmode="RGB")
+    meanRed = None
 
+    # Get mean red value, if image is color
+    if len(image.shape) > 2:
+        meanRed = image[:, :, 0].mean()
     # Convert to grayscale if needed
     if len(image.shape) != 2:
         image = image[:, :, 0]
@@ -51,7 +54,9 @@ def readImage(fileName):
     if imageShape[0] != image.shape:
         image = np.rot90(np.fliplr(image.T))
     
-    return image
+    return image, meanRed
+
+
 
 def createGrid(image):
     """
@@ -125,25 +130,71 @@ def toneRange(tones):
 
     return minTone, maxTone, toneIncrement
 
-def setToneLib(minTone, toneIncrement):
+def setToneLib(midiNote, musicNote, minTone, toneIncrement):
     """
     returns a tone dict, created using the toneRange
     """
-    # The tone library starting at C (I think)
+    
     return {
-            60 : {'tone': [minTone, minTone + toneIncrement], 'duration': .5},
-            61 : {'tone': [minTone + toneIncrement, minTone + (toneIncrement*2)], 'duration': .5},
-            62 : {'tone': [minTone + (toneIncrement*2), minTone + (toneIncrement*3)], 'duration': .5},
-            63 : {'tone': [minTone + (toneIncrement*3), minTone + (toneIncrement*4)], 'duration': .5},
-            64 : {'tone': [minTone + (toneIncrement*4), minTone + (toneIncrement*5)], 'duration': .5},
-            65 : {'tone': [minTone + (toneIncrement*5), minTone + (toneIncrement*6)], 'duration': .5},
-            66 : {'tone': [minTone + (toneIncrement*6), minTone + (toneIncrement*7)], 'duration': .5},
-            67 : {'tone': [minTone + (toneIncrement*7), minTone + (toneIncrement*8)], 'duration': .5},
-            68 : {'tone': [minTone + (toneIncrement*8), minTone + (toneIncrement*9)], 'duration': .5},
-            69 : {'tone': [minTone + (toneIncrement*9), minTone + (toneIncrement*10)], 'duration': .5},
-            70 : {'tone': [minTone + (toneIncrement*10), minTone + (toneIncrement*11)], 'duration': .5},
-            71 : {'tone': [minTone + (toneIncrement*11), minTone + (toneIncrement*12)], 'duration': .5},
+            midiNote[0] : {'tone': [minTone, minTone + toneIncrement]},
+            midiNote[1] : {'tone': [minTone + toneIncrement, minTone + (toneIncrement*2)]},
+            midiNote[2] : {'tone': [minTone + (toneIncrement*2), minTone + (toneIncrement*3)]},
+            midiNote[3] : {'tone': [minTone + (toneIncrement*3), minTone + (toneIncrement*4)]},
+            midiNote[4] : {'tone': [minTone + (toneIncrement*4), minTone + (toneIncrement*5)]},
+            midiNote[5] : {'tone': [minTone + (toneIncrement*5), minTone + (toneIncrement*6)]},
+            midiNote[6] : {'tone': [minTone + (toneIncrement*6), minTone + (toneIncrement*7)]},
+            midiNote[7] : {'tone': [minTone + (toneIncrement*7), minTone + (toneIncrement*8)]},
+            midiNote[8] : {'tone': [minTone + (toneIncrement*8), minTone + (toneIncrement*9)]},
+            midiNote[9] : {'tone': [minTone + (toneIncrement*9), minTone + (toneIncrement*10)]},
+            midiNote[10] : {'tone': [minTone + (toneIncrement*10), minTone + (toneIncrement*11)]},
+            midiNote[11] : {'tone': [minTone + (toneIncrement*11), minTone + (toneIncrement*12)]},
            }
+
+def currentScale(meanRed):
+    # Take mean red value from image returns numbers of divisions by 16.
+    # This value is used to select the scale 
+    return int(meanRed / 16)
+
+def calculateScale(offset):
+    # We need the offset, so we can calculate a new sequence of tones
+    # We need the offset, so we can calculate a new sequence of midi tones
+    # BASE_NOTES - list of notes, we need to take the offset, and slice the list, to make a new sequence
+    # From the offset, we create a new list of midinotes : BASE_MIDI_NOTE + offset
+    # The tone library starting at scale
+    midiNote = []
+    musicNote = []
+    for idx in range(12):
+        midiNote.append((BASE_MIDI_NOTE + offset) + idx)
+    
+    musicNote.extend(BASE_NOTES[offset:])
+    musicNote.extend(BASE_NOTES[:offset])
+    return midiNote, musicNote
+
+def moveToneScale(values, toneLibrary, scaleDict, scale):
+    
+    #scaleDict contains the midivalues for the scale, and the music notes in order
+    # Midi values and notes are key value pairs
+    rescaledTones = []
+
+    # Max allowable tone is used to check whether the tone exceeds the scale
+    # If the tone exceeds the scale, it is scaled to a scale base note 
+    # 12 tones is offset by one, because offset is inclusive of note 1
+    maxAllowableTone = BASE_MIDI_NOTE + scale['offset'] + (12 - 1)
+
+    # Loop through the mean grid values
+    # Get the tone from the library
+    # If the tone is in the scale, do nothing
+    # Else, add a semitone to make the tone fit the scale
+
+    for meanVal in values:
+        tone = getTone(toneLibrary, meanVal)  
+        if scaleDict[tone] in scale['scale']:
+            rescaledTones.append(tone)
+        elif (tone + 1) > maxAllowableTone:
+            rescaledTones.append(tone - (12 - 1))
+        else:
+            rescaledTones.append(tone + 1)
+    return rescaledTones
 
 def getTone(lib, val):
     """
@@ -151,18 +202,19 @@ def getTone(lib, val):
     """
     for tone in lib:
         if lib[tone]['tone'][0] <= int(val) <= lib[tone]['tone'][1]:
-            return tone, lib[tone]['duration']
+            return tone
 
-def saveMidiValues(folder, toneLibrary, tones, fileName):
+def saveMidiValues(folder, meanLuminanceVals, convertedTone, scaleDict, scale, fileName):
     """
-    Save raw luminance and midi values as csv
+    Save raw luminance, converted midi values, and associated music note as csv
     """
     with open("./{}/{}.csv".format(folder, fileName), "w") as myFile:
         # Write column headers
-        myFile.write("{0},{1},{2}\n".format("Index", "Luminance", "Tone"))
+        myFile.write("{0},{1},{2},{3},{4}\n".format("Index", "Luminance", "RescaledTone", "MusicNote", "Scale"))
         # Write values
-        for index, eachVal in enumerate(tones):
-            myFile.write("{0},{1},{2}\n".format(index, eachVal, getTone(toneLibrary, eachVal)[0]))
+        for index, eachVal in enumerate(meanLuminanceVals):
+            tone = convertedTone[index]
+            myFile.write("{0},{1},{2},{3},{4}\n".format(index, eachVal, tone, scaleDict[tone], scale))
 
 def makeMidi(fileName, toneLibrary, tones):
     """
@@ -181,11 +233,9 @@ def makeMidi(fileName, toneLibrary, tones):
     tempMIDI.addTempo(track, time, tempo)
     
     # Add each tone from the current image
-    for index, val in enumerate(tones):
-        # Get tone from library
-        tone = getTone(toneLibrary, val)[0]
-        # Get duration from library
-        duration = getTone(toneLibrary, val)[1]
+    for index, tone in enumerate(tones):
+        # Set duration 
+        duration = .5
         # Set interval between tones
         toneInterval = (index) * duration
         # Add note to track
@@ -210,10 +260,20 @@ if __name__ == "__main__":
     makeFolder("midiFiles")
 
     for fileName in getImagePaths("./images.txt"):
-        
+        print("\n******** Sonifying {} ********\n".format(fileName))            
         # Read image 
-        image = readImage(fileName)
+        image, meanRed = readImage(fileName)
+        print("The mean red value in the image: %d" % (meanRed))
         
+        # Set scale information
+        scaleIndex = currentScale(meanRed)
+        scaleNote = list(scales.keys())[scaleIndex]
+        scale = scales[scaleNote]
+        print("The tones will be rescaled to ", scaleNote)
+
+        midiNotes, musicNotes = calculateScale(scale['offset'])
+        scaleDict = dict(zip(midiNotes, musicNotes))
+
         # Get image name
         name = fileName.split('.')[0].split('/')[-1]
         
@@ -225,21 +285,25 @@ if __name__ == "__main__":
         minTone, maxTone, toneInc = toneRange(tones)
 
         # Create the tone library based on current picture values
-        toneLibrary = setToneLib(minTone, toneInc)
+        toneLibrary = setToneLib(midiNotes, musicNotes, minTone, toneInc)
+
+        # Rescale tones
+        covertedTones = moveToneScale(tones[name], toneLibrary, scaleDict, scale)
 
         # save midi data as csv
-        saveMidiValues("imageData", toneLibrary, tones[name], name)
+        saveMidiValues("imageData", tones[name], covertedTones, scaleDict, scaleNote, name)
         
         import datetime
         start = datetime.datetime.now()
+        print("")
         print("script execution stared at:", start)
         print("script run times")
         
         # make the midi file
-        makeMidi(name, toneLibrary, tones[name])
+        makeMidi(name, toneLibrary, covertedTones)
 
         end = datetime.datetime.now()
         print("Script execution ended at:", end)
         total_time = end - start
         print("Script totally ran for :", total_time)
-    
+        print("\n******** Sonification of {} complete! ********\n".format(fileName))     
