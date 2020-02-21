@@ -1,4 +1,5 @@
 import os
+import copy
 import argparse
 import imageio
 import numpy as np
@@ -24,7 +25,12 @@ def makeFolder(folderName):
 
 def saveImage(folder, fileName, image):
     imagePath = os.path.join(folder, os.path.basename(fileName + '.png'))
-    imageio.imwrite(imagePath, image)
+    try:
+        imageio.imwrite(imagePath, image)
+    except Exception as e:
+        print(e)
+        im = Image.fromarray(image)
+        im.save(imagePath)
 
 def getImagePaths(fileName):
     """
@@ -39,21 +45,13 @@ def readImage(fileName):
     Reads image using imageio, and returns greyscale image
     """
     temp = Image.open(fileName)
-    imageShape = ImageOps.exif_transpose(temp).size
-    image = imageio.imread(fileName, pilmode="RGB")
-    meanRed = None
+    image = np.array(temp)
+    meanRed = 0
 
     # Get mean red value, if image is color
     if len(image.shape) > 2:
         meanRed = image[:, :, 0].mean()
-    # Convert to grayscale if needed
-    if len(image.shape) != 2:
-        image = image[:, :, 0]
-
-    # Rotate image if required
-    if imageShape[0] != image.shape:
-        image = np.rot90(np.fliplr(image.T))
-    
+       
     return image, meanRed
 
 
@@ -94,12 +92,13 @@ def getPixelValues(image, tones, name):
         for val in row:
             tones[name].append(val)
     
-def getGridValues(image, tones, name):
+def getGridValues(image, tones, name, greyScale=False):
     """
     Appends the luminance values for each grid to the tones lib
     Also creates an image from mean grid pieces to demonstrate the effect
     """
     testImage = image  # test image visualises the grid
+    redImage = copy.copy(image)  # needs copy of image to change individually
     # Get grid
     grid = createGrid(image)
     
@@ -108,9 +107,16 @@ def getGridValues(image, tones, name):
         newImage = image[piece[0]:piece[1], piece[2]:piece[3]]
         tones[name].append(newImage.mean())
         testImage[piece[0]:piece[1], piece[2]:piece[3]] = newImage.mean()
+        # Create grid image in red only
+        if not greyScale:
+            redImage[piece[0]:piece[1], piece[2]:piece[3], :] = newImage.mean()
+            redImage[piece[0]:piece[1], piece[2]:piece[3], 1] = 0
+            redImage[piece[0]:piece[1], piece[2]:piece[3], 2] = 0
 
     # Save grid as image
     saveImage("gridImages", name, testImage)
+    if not greyScale:
+        saveImage("gridImages", 'red{}'.format(name), redImage)
 
 def toneRange(tones):
     """
@@ -124,9 +130,9 @@ def toneRange(tones):
     # The tone increment
     toneIncrement = (maxTone - minTone) / 12
     
-    print("Your lowest tone is {}".format(minTone))
-    print("Your highest tone is {}".format(maxTone))
-    print("Your tone increment is {}".format(toneIncrement))
+    print("Your lowest luminance is {}".format(minTone))
+    print("Your highest luminance is {}".format(maxTone))
+    print("Your luminance increment is {}".format(toneIncrement))
 
     return minTone, maxTone, toneIncrement
 
@@ -250,9 +256,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.pixel:
-        print("Creating midi from pixels...")
+        print("\nCreating midi from pixels...")
     else:
-        print("Creating midi from grid...")
+        print("\nCreating midi from grid...")
     
     # Make some relevant folders
     makeFolder("gridImages")
@@ -260,7 +266,11 @@ if __name__ == "__main__":
     makeFolder("midiFiles")
 
     for fileName in getImagePaths("./images.txt"):
-        print("\n******** Sonifying {} ********\n".format(fileName))            
+        fileName, greyScale = fileName.split(',')
+        greyScale = bool(int(greyScale.strip()))
+
+        print("\n******** Sonifying {} ********\n".format(fileName))
+        print("Greyscale image? ", greyScale)                   
         # Read image 
         image, meanRed = readImage(fileName)
         print("The mean red value in the image: %d" % (meanRed))
@@ -273,13 +283,16 @@ if __name__ == "__main__":
 
         midiNotes, musicNotes = calculateScale(scale['offset'])
         scaleDict = dict(zip(midiNotes, musicNotes))
+        print("Miditone scale: \t", midiNotes)
+        print("Resequenced note scale: ", musicNotes)
+        print("Mean red value selected the {} scale: {}".format(scaleNote, scale['scale']))
 
         # Get image name
         name = fileName.split('.')[0].split('/')[-1]
         
         # Get values for conversion to midi tones
         tones[name] = []
-        [getGridValues, getPixelValues][args.pixel](image, tones, name)
+        [getGridValues, getPixelValues][args.pixel](image, tones, name, greyScale=greyScale)
         
         # Get tone ranges
         minTone, maxTone, toneInc = toneRange(tones)
@@ -295,8 +308,7 @@ if __name__ == "__main__":
         
         import datetime
         start = datetime.datetime.now()
-        print("")
-        print("script execution stared at:", start)
+        print("\nscript execution stared at:", start)
         print("script run times")
         
         # make the midi file
