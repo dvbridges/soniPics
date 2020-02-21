@@ -1,0 +1,12 @@
+# data files
+*.csv
+
+# image files
+*.mid
+
+# red images
+*.png
+
+*.pyc
+
+

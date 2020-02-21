@@ -1,1 +1,1 @@
-images/mountain.jpg
+images/blue.jpg, 0
