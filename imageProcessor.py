@@ -9,6 +9,14 @@ from random import shuffle
 from midiutil.MidiFile import MIDIFile
 from scales import scales, BASE_NOTES, BASE_MIDI_NOTE
 
+hasSkimage=False
+try:
+    import skimage
+    from skimage.viewer import ImageViewer
+    hasSkimage=True
+except ImportError:
+    pass
+
 
 # Set command line interface
 parser = argparse.ArgumentParser()
@@ -101,17 +109,42 @@ def getGridValues(image, tones, name, greyScale=False):
     redImage = copy.copy(image)  # needs copy of image to change individually
     # Get grid
     grid = createGrid(image)
-    
+
+    # Make mask size of image
+    mask = np.ones(shape=image.shape[0:2], dtype="bool") 
+    mod =  np.random.choice(np.arange(-200, 200, 20), size=1)[0]
+
     # Get tones 
     for piece in grid:
         newImage = image[piece[0]:piece[1], piece[2]:piece[3]]
         tones[name].append(newImage.mean())
         testImage[piece[0]:piece[1], piece[2]:piece[3]] = newImage.mean()
+        
+        # Mask drawn using code adapted from 
+        # https://datacarpentry.org/image-processing/04-drawing/
+
+        offsetY = piece[3] - piece[2]   # Y offset
+        offsetX = piece[1] - piece[0]   # X offset
+        offset = min(offsetX, offsetY)  # take the smallest size for radius
+        radius = offset / 2             # Radius from grid size
+        
+        mod = mod * -1  # modify start point for offsetting rows
+        x = piece[0] + offset / 2 - mod 
+        y = piece[2] + offset / 2 
+
+        if hasSkimage:
+            rr, cc = skimage.draw.circle(x, y, radius=radius, shape=image.shape[0:2])
+            mask[rr, cc] = False
+
         # Create grid image in red only
         if not greyScale:
             redImage[piece[0]:piece[1], piece[2]:piece[3], :] = newImage.mean()
             redImage[piece[0]:piece[1], piece[2]:piece[3], 1] = 0
             redImage[piece[0]:piece[1], piece[2]:piece[3], 2] = 0
+
+    if hasSkimage:
+        testImage[mask] = 0
+        redImage[mask] = 0
 
     # Save grid as image
     saveImage("gridImages", name, testImage)
